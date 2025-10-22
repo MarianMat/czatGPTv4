@@ -13,7 +13,8 @@ def init_db():
             personality TEXT,
             model TEXT,
             memory_mode TEXT,
-            language TEXT
+            language TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
     # Tabela wiadomości
@@ -22,13 +23,15 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             conversation_id INTEGER,
             role TEXT,
-            content TEXT
+            content TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
     conn.commit()
     conn.close()
 
 def create_conversation(name, personality, model, memory_mode, language):
+    """Tworzy nową rozmowę w DB i zwraca jej id"""
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
     c.execute(
@@ -68,6 +71,7 @@ def get_conversation(convo_id):
     return row
 
 def save_message(convo_id, role, content):
+    """Zapisuje wiadomość w DB. Rozmowa musi istnieć wcześniej."""
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
     c.execute(
@@ -80,9 +84,10 @@ def save_message(convo_id, role, content):
 def get_messages(convo_id):
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-    c.execute("SELECT role, content FROM messages WHERE conversation_id=?", (convo_id,))
+    c.execute("SELECT role, content FROM messages WHERE conversation_id=? ORDER BY id ASC", (convo_id,))
     rows = [{"role": r[0], "content": r[1]} for r in c.fetchall()]
     conn.close()
     return rows
+
 
 
