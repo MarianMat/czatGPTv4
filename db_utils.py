@@ -38,16 +38,22 @@ def init_db():
 
 # --- Tworzenie nowej rozmowy ---
 def create_conversation(name, personality, model, memory_mode, language):
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute("""
-        INSERT INTO conversations (name, personality, model, memory_mode, language, created_at)
-        VALUES (?, ?, ?, ?, ?, ?)
-    """, (name, personality, model, memory_mode, language, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
-    conn.commit()
-    convo_id = c.lastrowid
-    conn.close()
-    return convo_id
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        c = conn.cursor()
+        c.execute("""
+            INSERT INTO conversations (name, personality, model, memory_mode, language, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (name, personality, model, memory_mode, language, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+        conn.commit()
+        convo_id = c.lastrowid
+        conn.close()
+        return convo_id
+    except sqlite3.OperationalError:
+        # jeśli tabela nie istnieje — stwórz bazę i spróbuj ponownie
+        init_db()
+        return create_conversation(name, personality, model, memory_mode, language)
+
 
 # --- Lista rozmów ---
 def list_conversations():
