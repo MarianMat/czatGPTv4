@@ -1,38 +1,34 @@
 from qdrant_client import QdrantClient, models
 from openai import OpenAI
-import streamlit as st
+import uuid
 
-def init_qdrant():
-    client = QdrantClient(
-        url=st.secrets["QDRANT_URL"],
-        api_key=st.secrets["QDRANT_API_KEY"],
-    )
+def save_to_qdrant(prompt, reply, conv_id, client):
     try:
-        client.get_collection("conversations")
-    except:
-        client.recreate_collection(
-            collection_name="conversations",
-            vectors_config=models.VectorParams(size=1536, distance=models.Distance.COSINE),
+        # Stworzenie embeddingu z treści promptu
+        openai_client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+        emb = openai_client.embeddings.create(
+            model="text-embedding-3-small",
+            input=prompt
+        ).data[0].embedding
+
+        # Upewnij się, że reply to tekst
+        if isinstance(reply, dict):
+            reply_text = reply.get("content", str(reply))
+        else:
+            reply_text = str(reply)
+
+        # Tworzenie punktu do zapisania
+        point = models.PointStruct(
+            id=str(uuid.uuid4()),
+            vector=emb,
+            payload={
+                "conversation_id": str(conv_id),
+                "prompt": str(prompt),
+                "reply": reply_text,
+            },
         )
-    return client
 
-def save_to_qdrant(user_msg, assistant_msg, conversation_id, client):
-    openai_client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
-    emb_user = openai_client.embeddings.create(model="text-embedding-3-small", input=user_msg).data[0].embedding
-    emb_assistant = openai_client.embeddings.create(model="text-embedding-3-small", input=assistant_msg).data[0].embedding
+        client.upsert(collection_name="chat_memory", points=[point])
 
-    client.upsert(
-        collection_name="conversations",
-        points=[
-            models.PointStruct(
-                id=None,
-                vector=emb_user,
-                payload={"conversation_id": conversation_id, "role": "user", "content": user_msg}
-            ),
-            models.PointStruct(
-                id=None,
-                vector=emb_assistant,
-                payload={"conversation_id": conversation_id, "role": "assistant", "content": assistant_msg}
-            )
-        ]
-    )
+    except Exception as e:
+        print(f"❌ Błąd zapisu do Qdrant: {e}")
