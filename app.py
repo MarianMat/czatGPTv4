@@ -73,7 +73,7 @@ if "conversation_id" not in st.session_state:
 lang = st.sidebar.selectbox(translations["Polski"]["language_switch"], ["Polski"], index=0)
 t = translations[lang]
 
-# --- Sidebar: Styl GPT (prompt) - nad przyciskiem Nowa rozmowa ---
+# --- Sidebar: Styl GPT (prompt) nad przyciskiem Nowa rozmowa ---
 st.sidebar.markdown("---")
 st.sidebar.subheader(t["personality"])
 st.session_state.chatbot_personality = st.sidebar.text_area(
@@ -91,9 +91,10 @@ if st.sidebar.button(t["new_conversation"]):
     if st.session_state.keep_prompt == "Tak":
         st.session_state.temp_prompt = st.session_state.chatbot_personality
     else:
-        st.session_state.temp_prompt = ""  # puste okno, użytkownik musi wpisać prompt
-    st.session_state.conversation_id = None  # nowa rozmowa, jeszcze nie zapisujemy w DB
+        st.session_state.temp_prompt = ""  # puste pole, użytkownik musi wpisać prompt
+    st.session_state.conversation_id = None
     st.session_state.first_message_sent = False
+    st.session_state.conversation_title = None
 
 # --- Sidebar: Lista rozmów ---
 st.sidebar.markdown(f"**{t['conversation_list']}**")
@@ -102,7 +103,7 @@ for cid, name in list_conversations():
         st.session_state.conversation_id = cid
         st.session_state.first_message_sent = True
         conv = get_conversation(cid)
-        st.session_state.chatbot_personality = conv[2]  # aktualny prompt z DB
+        st.session_state.chatbot_personality = conv[2]  # prompt z DB
 
 # --- Sidebar: Model ---
 st.sidebar.markdown("---")
