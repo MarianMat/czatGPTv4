@@ -7,7 +7,6 @@ DB_NAME = "conversations.db"
 def init_db():
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-
     # Tabela rozmów
     c.execute("""
         CREATE TABLE IF NOT EXISTS conversations (
@@ -20,7 +19,6 @@ def init_db():
             created_at TEXT
         )
     """)
-
     # Tabela wiadomości
     c.execute("""
         CREATE TABLE IF NOT EXISTS messages (
@@ -28,34 +26,26 @@ def init_db():
             conversation_id INTEGER,
             role TEXT,
             content TEXT,
-            timestamp TEXT,
-            FOREIGN KEY(conversation_id) REFERENCES conversations(id)
+            created_at TEXT
         )
     """)
-
     conn.commit()
     conn.close()
 
 # --- Tworzenie nowej rozmowy ---
 def create_conversation(name, personality, model, memory_mode, language):
-    try:
-        conn = sqlite3.connect(DB_NAME)
-        c = conn.cursor()
-        c.execute("""
-            INSERT INTO conversations (name, personality, model, memory_mode, language, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (name, personality, model, memory_mode, language, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
-        conn.commit()
-        convo_id = c.lastrowid
-        conn.close()
-        return convo_id
-    except sqlite3.OperationalError:
-        # jeśli tabela nie istnieje — stwórz bazę i spróbuj ponownie
-        init_db()
-        return create_conversation(name, personality, model, memory_mode, language)
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("""
+        INSERT INTO conversations (name, personality, model, memory_mode, language, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+    """, (name, personality, model, memory_mode, language, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+    conn.commit()
+    convo_id = c.lastrowid
+    conn.close()
+    return convo_id
 
-
-# --- Lista rozmów ---
+# --- Pobranie listy rozmów ---
 def list_conversations():
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
@@ -64,48 +54,41 @@ def list_conversations():
     conn.close()
     return rows
 
-# --- Pobranie rozmowy po ID ---
-def get_conversation(conversation_id):
+# --- Pobranie wiadomości dla danej rozmowy ---
+def get_messages(conversation_id):
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-    c.execute("SELECT * FROM conversations WHERE id = ?", (conversation_id,))
-    conv = c.fetchone()
+    c.execute("SELECT role, content FROM messages WHERE conversation_id = ? ORDER BY id ASC", (conversation_id,))
+    rows = [{"role": r[0], "content": r[1]} for r in c.fetchall()]
     conn.close()
-    return conv
+    return rows
 
 # --- Zapis wiadomości ---
 def save_message(conversation_id, role, content):
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
     c.execute("""
-        INSERT INTO messages (conversation_id, role, content, timestamp)
+        INSERT INTO messages (conversation_id, role, content, created_at)
         VALUES (?, ?, ?, ?)
     """, (conversation_id, role, content, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
     conn.commit()
     conn.close()
 
-# --- Pobranie wszystkich wiadomości ---
-def get_messages(conversation_id):
+# --- Pobranie szczegółów rozmowy ---
+def get_conversation(conversation_id):
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-    c.execute("""
-        SELECT role, content FROM messages
-        WHERE conversation_id = ?
-        ORDER BY id ASC
-    """, (conversation_id,))
-    rows = c.fetchall()
+    c.execute("SELECT * FROM conversations WHERE id = ?", (conversation_id,))
+    row = c.fetchone()
     conn.close()
-    return [{"role": r[0], "content": r[1]} for r in rows]
+    return row
 
-# --- Nowa funkcja: aktualizacja nazwy rozmowy ---
+# --- Aktualizacja nazwy rozmowy ---
 def update_conversation_name(conversation_id, new_name):
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-    c.execute("""
-        UPDATE conversations
-        SET name = ?
-        WHERE id = ?
-    """, (new_name, conversation_id))
+    c.execute("UPDATE conversations SET name = ? WHERE id = ?", (new_name, conversation_id))
     conn.commit()
     conn.close()
+
 
