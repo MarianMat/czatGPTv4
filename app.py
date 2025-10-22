@@ -41,7 +41,7 @@ def generate_title_from_text(text: str) -> str:
         text = text[:50] + "..."
     return text or "Nowa rozmowa"
 
-# --- Główna funkcja generująca odpowiedź ---
+# --- Funkcja generująca odpowiedź ---
 def get_reply(prompt: str, memory: list, model: str, personality: str) -> dict:
     msgs = [{"role": "system", "content": personality}] + memory + [{"role": "user", "content": prompt}]
     resp = client.chat.completions.create(model=model, messages=msgs)
@@ -61,47 +61,48 @@ st.set_page_config(page_title="MójGPT", layout="centered")
 
 # --- Stan aplikacji ---
 if "conversation_id" not in st.session_state:
-    convo_id = create_conversation(
-        "Nowa rozmowa",
-        translations["Polski"]["default_personality"],
-        "gpt-4o",
-        "Pełna historia",
-        "Polski"
-    )
-    st.session_state.conversation_id = convo_id
+    st.session_state.conversation_id = None
     st.session_state.model = "gpt-4o"
     st.session_state.chatbot_personality = translations["Polski"]["default_personality"]
     st.session_state.memory_mode = "Pełna historia"
+    st.session_state.conversation_title = None
+    st.session_state.temp_prompt = ""  # Tymczasowy prompt dla nowej rozmowy
+    st.session_state.first_message_sent = False
 
 # --- Sidebar: język ---
 lang = st.sidebar.selectbox(translations["Polski"]["language_switch"], ["Polski"], index=0)
 t = translations[lang]
 
+# --- Sidebar: Styl GPT (prompt) - nad przyciskiem Nowa rozmowa ---
+st.sidebar.markdown("---")
+st.sidebar.subheader(t["personality"])
+st.session_state.chatbot_personality = st.sidebar.text_area(
+    "Treść promptu (rola asystenta):",
+    value=st.session_state.get("chatbot_personality", translations["Polski"]["default_personality"]),
+    height=150
+)
+
 # --- Sidebar: Nowa rozmowa ---
+st.sidebar.markdown("---")
 if st.sidebar.button(t["new_conversation"]):
     st.session_state.keep_prompt = st.sidebar.radio(
         "Czy chcesz zachować obecny prompt?", ["Tak", "Nie"], index=0
     )
     if st.session_state.keep_prompt == "Tak":
-        personality_to_use = st.session_state.chatbot_personality
+        st.session_state.temp_prompt = st.session_state.chatbot_personality
     else:
-        personality_to_use = st.sidebar.text_area("Podaj nowy prompt:", t["default_personality"])
-    convo_id = create_conversation(
-        t["default_conversation_name"].format(datetime.now().strftime("%H:%M")),
-        personality_to_use,
-        "gpt-4o",
-        "Pełna historia",
-        lang
-    )
-    st.session_state.conversation_id = convo_id
-    st.session_state.chatbot_personality = personality_to_use
-    st.success("🆕 Utworzono nową rozmowę!")
+        st.session_state.temp_prompt = ""  # puste okno, użytkownik musi wpisać prompt
+    st.session_state.conversation_id = None  # nowa rozmowa, jeszcze nie zapisujemy w DB
+    st.session_state.first_message_sent = False
 
 # --- Sidebar: Lista rozmów ---
 st.sidebar.markdown(f"**{t['conversation_list']}**")
 for cid, name in list_conversations():
     if st.sidebar.button(name, key=f"conv_{cid}"):
         st.session_state.conversation_id = cid
+        st.session_state.first_message_sent = True
+        conv = get_conversation(cid)
+        st.session_state.chatbot_personality = conv[2]  # aktualny prompt z DB
 
 # --- Sidebar: Model ---
 st.sidebar.markdown("---")
@@ -121,53 +122,69 @@ st.session_state.memory_mode = st.sidebar.selectbox(
     index=memory_mode_options.index(st.session_state.get("memory_mode", "Pełna historia"))
 )
 
-# --- Sidebar: Styl GPT (prompt) ---
-st.sidebar.markdown("---")
-st.sidebar.subheader(t["personality"])
-st.session_state.chatbot_personality = st.sidebar.text_area(
-    "Treść promptu (rola asystenta):",
-    value=st.session_state.get("chatbot_personality", translations["Polski"]["default_personality"]),
-    height=150
-)
-
 # --- Główne okno ---
 st.title(t["title"])
 
-conv = get_conversation(st.session_state.conversation_id)
-st.subheader(f"{t['chat_title']}: {conv[1]}")
-st.caption(f"🧩 Aktualny prompt: {st.session_state.chatbot_personality}")
-
 # --- Historia czatu ---
-messages = get_messages(st.session_state.conversation_id)
-for msg in messages:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
+messages = []
+if st.session_state.conversation_id:
+    messages = get_messages(st.session_state.conversation_id)
+    conv = get_conversation(st.session_state.conversation_id)
+    st.subheader(f"{t['chat_title']}: {conv[1]}")
+    st.caption(f"🧩 Aktualny prompt: {st.session_state.chatbot_personality}")
+    for msg in messages:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+else:
+    st.subheader(f"{t['chat_title']}: Nowa rozmowa")
+    st.caption(f"🧩 Aktualny prompt: {st.session_state.temp_prompt or 'Wpisz prompt aby rozpocząć rozmowę'}")
 
 # --- Obsługa inputu ---
 prompt = st.chat_input(t["input_placeholder"])
 if prompt:
-    save_message(st.session_state.conversation_id, "user", prompt)
-    with st.chat_message("user"):
-        st.markdown(prompt)
+    # --- Pierwsza wiadomość nowej rozmowy ---
+    if st.session_state.conversation_id is None:
+        if not st.session_state.temp_prompt:
+            st.warning("🛑 Wpisz najpierw prompt dla roli asystenta!")
+        else:
+            convo_id = create_conversation(
+                generate_title_from_text(st.session_state.temp_prompt),
+                st.session_state.temp_prompt,
+                st.session_state.model,
+                st.session_state.memory_mode,
+                lang
+            )
+            st.session_state.conversation_id = convo_id
+            st.session_state.first_message_sent = True
+            messages = []
 
-    if st.session_state.memory_mode == "Ostatnie 10 wiadomości":
-        memory = messages[-10:]
-    elif st.session_state.memory_mode == "Rozszerzona (30)":
-        memory = messages[-30:]
-    else:
-        memory = messages
+    # --- Standardowa logika dla wszystkich wiadomości ---
+    if st.session_state.conversation_id:
+        save_message(st.session_state.conversation_id, "user", prompt)
+        with st.chat_message("user"):
+            st.markdown(prompt)
 
-    reply = get_reply(prompt, memory, st.session_state.model, st.session_state.chatbot_personality)
-    save_message(st.session_state.conversation_id, "assistant", reply["content"])
+        # --- Przygotowanie pamięci ---
+        if st.session_state.memory_mode == "Ostatnie 10 wiadomości":
+            memory = messages[-10:]
+        elif st.session_state.memory_mode == "Rozszerzona (30)":
+            memory = messages[-30:]
+        else:
+            memory = messages
 
-    # --- Automatyczne nadanie tytułu ---
-    if conv[1] == "Nowa rozmowa":
-        new_title = generate_title_from_text(reply["content"])
-        update_conversation_name(st.session_state.conversation_id, new_title)
-        st.session_state["conversation_title"] = new_title
+        # --- Generowanie odpowiedzi ---
+        reply = get_reply(prompt, memory, st.session_state.model, st.session_state.chatbot_personality)
+        save_message(st.session_state.conversation_id, "assistant", reply["content"])
 
-    with st.chat_message("assistant"):
-        st.markdown(reply["content"])
+        # --- Automatyczne nadanie tytułu, jeśli to pierwsza wiadomość ---
+        if not st.session_state.conversation_title:
+            new_title = generate_title_from_text(reply["content"])
+            update_conversation_name(st.session_state.conversation_id, new_title)
+            st.session_state.conversation_title = new_title
 
-    save_to_qdrant(prompt, reply["content"], f"Conv{st.session_state['conversation_id']}", qdrant_client)
+        with st.chat_message("assistant"):
+            st.markdown(reply["content"])
+
+        save_to_qdrant(prompt, reply["content"], f"Conv{st.session_state.conversation_id}", qdrant_client)
+
 
