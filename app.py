@@ -1,8 +1,9 @@
 import streamlit as st
 from openai import OpenAI
 from qdrant_utils import init_qdrant, save_to_qdrant
-from db_utils import init_db, create_conversation, list_conversations, get_messages, save_message, get_conversation
+from db_utils import init_db, create_conversation, list_conversations, get_messages, save_message, get_conversation, update_conversation_name
 from datetime import datetime
+import re
 
 # --- Inicjalizacja ---
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
@@ -32,6 +33,15 @@ translations = {
     }
 }
 
+# --- Funkcja generująca automatyczny tytuł rozmowy ---
+def generate_title_from_text(text: str) -> str:
+    text = text.strip().split("\n")[0]
+    text = re.sub(r"[^\w\sąęćłńóśźżĄĘĆŁŃÓŚŹŻ]", "", text)
+    if len(text) > 50:
+        text = text[:50] + "..."
+    return text or "Nowa rozmowa"
+
+# --- Główna funkcja generująca odpowiedź ---
 def get_reply(prompt: str, memory: list, model: str, personality: str) -> dict:
     msgs = [{"role": "system", "content": personality}] + memory + [{"role": "user", "content": prompt}]
     resp = client.chat.completions.create(model=model, messages=msgs)
@@ -46,6 +56,7 @@ def get_reply(prompt: str, memory: list, model: str, personality: str) -> dict:
         }
     }
 
+# --- Konfiguracja strony ---
 st.set_page_config(page_title="MójGPT", layout="centered")
 
 # --- Stan aplikacji ---
@@ -68,14 +79,23 @@ t = translations[lang]
 
 # --- Sidebar: Nowa rozmowa ---
 if st.sidebar.button(t["new_conversation"]):
+    st.session_state.keep_prompt = st.sidebar.radio(
+        "Czy chcesz zachować obecny prompt?", ["Tak", "Nie"], index=0
+    )
+    if st.session_state.keep_prompt == "Tak":
+        personality_to_use = st.session_state.chatbot_personality
+    else:
+        personality_to_use = st.sidebar.text_area("Podaj nowy prompt:", t["default_personality"])
     convo_id = create_conversation(
         t["default_conversation_name"].format(datetime.now().strftime("%H:%M")),
-        t["default_personality"],
+        personality_to_use,
         "gpt-4o",
         "Pełna historia",
         lang
     )
     st.session_state.conversation_id = convo_id
+    st.session_state.chatbot_personality = personality_to_use
+    st.success("🆕 Utworzono nową rozmowę!")
 
 # --- Sidebar: Lista rozmów ---
 st.sidebar.markdown(f"**{t['conversation_list']}**")
@@ -101,19 +121,21 @@ st.session_state.memory_mode = st.sidebar.selectbox(
     index=memory_mode_options.index(st.session_state.get("memory_mode", "Pełna historia"))
 )
 
-# --- Sidebar: Styl GPT ---
+# --- Sidebar: Styl GPT (prompt) ---
 st.sidebar.markdown("---")
 st.sidebar.subheader(t["personality"])
 st.session_state.chatbot_personality = st.sidebar.text_area(
-    t["personality"],
+    "Treść promptu (rola asystenta):",
     value=st.session_state.get("chatbot_personality", translations["Polski"]["default_personality"]),
     height=150
 )
 
 # --- Główne okno ---
 st.title(t["title"])
+
 conv = get_conversation(st.session_state.conversation_id)
 st.subheader(f"{t['chat_title']}: {conv[1]}")
+st.caption(f"🧩 Aktualny prompt: {st.session_state.chatbot_personality}")
 
 # --- Historia czatu ---
 messages = get_messages(st.session_state.conversation_id)
@@ -137,7 +159,15 @@ if prompt:
 
     reply = get_reply(prompt, memory, st.session_state.model, st.session_state.chatbot_personality)
     save_message(st.session_state.conversation_id, "assistant", reply["content"])
+
+    # --- Automatyczne nadanie tytułu ---
+    if conv[1] == "Nowa rozmowa":
+        new_title = generate_title_from_text(reply["content"])
+        update_conversation_name(st.session_state.conversation_id, new_title)
+        st.session_state["conversation_title"] = new_title
+
     with st.chat_message("assistant"):
         st.markdown(reply["content"])
 
     save_to_qdrant(prompt, reply["content"], f"Conv{st.session_state['conversation_id']}", qdrant_client)
+
