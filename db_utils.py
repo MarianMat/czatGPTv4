@@ -1,37 +1,55 @@
 import sqlite3
+from datetime import datetime
 
 DB_NAME = "conversations.db"
 
+# --- Inicjalizacja bazy danych ---
 def init_db():
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-    c.execute("""CREATE TABLE IF NOT EXISTS conversations (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name TEXT,
-                    personality TEXT,
-                    model TEXT,
-                    memory_mode TEXT,
-                    language TEXT
-                )""")
-    c.execute("""CREATE TABLE IF NOT EXISTS messages (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    conversation_id INTEGER,
-                    role TEXT,
-                    content TEXT
-                )""")
+
+    # Tabela rozmów
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS conversations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT,
+            personality TEXT,
+            model TEXT,
+            memory_mode TEXT,
+            language TEXT,
+            created_at TEXT
+        )
+    """)
+
+    # Tabela wiadomości
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            conversation_id INTEGER,
+            role TEXT,
+            content TEXT,
+            timestamp TEXT,
+            FOREIGN KEY(conversation_id) REFERENCES conversations(id)
+        )
+    """)
+
     conn.commit()
     conn.close()
 
+# --- Tworzenie nowej rozmowy ---
 def create_conversation(name, personality, model, memory_mode, language):
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-    c.execute("INSERT INTO conversations (name, personality, model, memory_mode, language) VALUES (?, ?, ?, ?, ?)",
-              (name, personality, model, memory_mode, language))
-    convo_id = c.lastrowid
+    c.execute("""
+        INSERT INTO conversations (name, personality, model, memory_mode, language, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+    """, (name, personality, model, memory_mode, language, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
     conn.commit()
+    convo_id = c.lastrowid
     conn.close()
     return convo_id
 
+# --- Lista rozmów ---
 def list_conversations():
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
@@ -40,26 +58,48 @@ def list_conversations():
     conn.close()
     return rows
 
-def get_conversation(convo_id):
+# --- Pobranie rozmowy po ID ---
+def get_conversation(conversation_id):
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-    c.execute("SELECT * FROM conversations WHERE id=?", (convo_id,))
-    row = c.fetchone()
+    c.execute("SELECT * FROM conversations WHERE id = ?", (conversation_id,))
+    conv = c.fetchone()
     conn.close()
-    return row
+    return conv
 
-def save_message(convo_id, role, content):
+# --- Zapis wiadomości ---
+def save_message(conversation_id, role, content):
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-    c.execute("INSERT INTO messages (conversation_id, role, content) VALUES (?, ?, ?)",
-              (convo_id, role, content))
+    c.execute("""
+        INSERT INTO messages (conversation_id, role, content, timestamp)
+        VALUES (?, ?, ?, ?)
+    """, (conversation_id, role, content, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
     conn.commit()
     conn.close()
 
-def get_messages(convo_id):
+# --- Pobranie wszystkich wiadomości ---
+def get_messages(conversation_id):
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-    c.execute("SELECT role, content FROM messages WHERE conversation_id=?", (convo_id,))
-    rows = [{"role": r[0], "content": r[1]} for r in c.fetchall()]
+    c.execute("""
+        SELECT role, content FROM messages
+        WHERE conversation_id = ?
+        ORDER BY id ASC
+    """, (conversation_id,))
+    rows = c.fetchall()
     conn.close()
-    return rows
+    return [{"role": r[0], "content": r[1]} for r in rows]
+
+# --- Nowa funkcja: aktualizacja nazwy rozmowy ---
+def update_conversation_name(conversation_id, new_name):
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("""
+        UPDATE conversations
+        SET name = ?
+        WHERE id = ?
+    """, (new_name, conversation_id))
+    conn.commit()
+    conn.close()
+
